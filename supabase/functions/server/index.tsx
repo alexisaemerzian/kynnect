@@ -1672,6 +1672,12 @@ const stripe = stripeSecretKey ? initializeStripe(stripeSecretKey) : null;
 // This will be created automatically or can be set via environment variable
 let PREMIUM_PRICE_ID = Deno.env.get('STRIPE_PRICE_ID');
 
+// Fix invalid price IDs (product IDs start with 'prod_', price IDs start with 'price_')
+if (PREMIUM_PRICE_ID && PREMIUM_PRICE_ID.startsWith('prod_')) {
+  console.warn('⚠️ Invalid STRIPE_PRICE_ID detected (product ID instead of price ID). Clearing it.');
+  PREMIUM_PRICE_ID = undefined;
+}
+
 // Diagnostic endpoint to check Stripe configuration
 app.get("/make-server-026f502c/stripe/status", (c) => {
   const hasSecretKey = !!Deno.env.get('STRIPE_SECRET_KEY');
