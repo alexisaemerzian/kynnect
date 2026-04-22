@@ -441,7 +441,7 @@ export function subscribeToConversation(
     .on(
       'postgres_changes',
       {
-        event: 'INSERT',
+        event: '*',
         schema: 'public',
         table: 'messages',
         filter: `conversation_id=eq.${conversationId}`,
@@ -456,7 +456,7 @@ export function subscribeToConversation(
           `)
           .eq('id', payload.new.id)
           .single();
-        
+
         if (data) {
           const message: Message = {
             id: data.id,
@@ -468,51 +468,20 @@ export function subscribeToConversation(
             createdAt: data.created_at,
             read: data.read,
           };
-          
-          onNewMessage(message);
-        }
-      }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${conversationId}`,
-      },
-      async (payload) => {
-        if (onMessageUpdated) {
-          const { data } = await supabase
-            .from('messages')
-            .select(`
-              *,
-              sender:users!sender_id(name, avatar_url)
-            `)
-            .eq('id', payload.new.id)
-            .single();
-          
-          if (data) {
-            const message: Message = {
-              id: data.id,
-              conversationId: data.conversation_id,
-              senderId: data.sender_id,
-              senderName: data.sender.name,
-              senderAvatar: data.sender.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=default',
-              text: data.content,
-              createdAt: data.created_at,
-              read: data.read,
-            };
-            
+
+          // Handle both INSERT and UPDATE events with a single callback
+          if (payload.eventType === 'INSERT') {
+            onNewMessage(message);
+          } else if (payload.eventType === 'UPDATE' && onMessageUpdated) {
             onMessageUpdated(message);
           }
         }
       }
     )
     .subscribe();
-  
+
   return () => {
-    subscription.unsubscribe();
+    supabase.removeChannel(subscription);
   };
 }
 
@@ -520,35 +489,24 @@ export function subscribeToConversations(
   userId: string,
   onConversationUpdated: () => void
 ) {
+  // Listen to messages table instead of conversations table
+  // This will trigger when new messages arrive in any conversation
   const subscription = supabase
-    .channel(`conversations:${userId}`)
+    .channel(`user-messages:${userId}`)
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
-        table: 'conversations',
-        filter: `participant1_id=eq.${userId}`,
-      },
-      () => {
-        onConversationUpdated();
-      }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'conversations',
-        filter: `participant2_id=eq.${userId}`,
+        table: 'messages',
       },
       () => {
         onConversationUpdated();
       }
     )
     .subscribe();
-  
+
   return () => {
-    subscription.unsubscribe();
+    supabase.removeChannel(subscription);
   };
 }
