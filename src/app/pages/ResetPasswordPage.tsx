@@ -6,7 +6,6 @@ import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import logo from 'figma:asset/9dc64ec9ee5e9411aa01b1f219c699ee9d6d7ea4.png';
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -94,7 +93,7 @@ export function ResetPasswordPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-24 h-24 mb-4">
-            <img src={logo} alt="Kynnect Logo" className="w-full h-full object-contain" />
+            <div className="text-4xl font-bold">Kynnect</div>
           </div>
           <h1 className="text-4xl font-bold mb-2">Reset Password</h1>
           <p className="text-gray-600 text-lg">
