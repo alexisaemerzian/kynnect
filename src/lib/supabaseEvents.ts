@@ -120,6 +120,53 @@ export async function createEvent(
   }
 }
 
+// Update event
+export async function updateEvent(
+  eventId: string,
+  userId: string,
+  updates: {
+    title?: string;
+    description?: string;
+    location?: string;
+    city?: string;
+    date?: string;
+    time?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('events')
+      .update(updates)
+      .eq('id', eventId)
+      .eq('host_id', userId);
+
+    if (error) throw error;
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating event:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Delete event
+export async function deleteEvent(eventId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('events')
+      .delete()
+      .eq('id', eventId)
+      .eq('host_id', userId);
+
+    if (error) throw error;
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error deleting event:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 // Get all events
 export async function getEvents(ethnicityId?: string): Promise<{ events: Event[]; error: string | null }> {
   try {
@@ -170,6 +217,51 @@ export async function getEvents(ethnicityId?: string): Promise<{ events: Event[]
   }
 }
 
+// Get single event
+export async function getEvent(eventId: string): Promise<{ event: Event | null; error: string | null }> {
+  try {
+    const { data: eventData, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('id', eventId)
+      .single();
+
+    if (error) throw error;
+
+    const event: Event = {
+      id: eventData.id,
+      title: eventData.title,
+      description: eventData.description,
+      type: eventData.type,
+      city: eventData.city,
+      location: eventData.location,
+      date: eventData.date,
+      time: eventData.time,
+      address: eventData.address,
+      host: {
+        id: eventData.host_id,
+        name: 'Loading...',
+        avatar: '',
+      },
+      attendees: 0,
+      maxAttendees: eventData.max_attendees,
+      imageUrl: eventData.image_url,
+      tags: eventData.tags,
+      coordinates: eventData.coordinates_lat && eventData.coordinates_lng ? {
+        lat: eventData.coordinates_lat,
+        lng: eventData.coordinates_lng,
+      } : undefined,
+      showAddress: eventData.show_address,
+      createdAt: eventData.created_at,
+    };
+
+    return { event, error: null };
+  } catch (error: any) {
+    console.error('Error getting event:', error);
+    return { event: null, error: error.message };
+  }
+}
+
 // RSVP to event
 export async function rsvpToEvent(eventId: string, userId: string): Promise<{ success: boolean; error?: string }> {
   try {
@@ -208,8 +300,59 @@ export async function cancelRSVP(eventId: string, userId: string): Promise<{ suc
   }
 }
 
+// Update RSVP status (for hosts to approve/decline)
+export async function updateRSVPStatus(
+  eventId: string,
+  userId: string,
+  status: 'accepted' | 'declined',
+  hostId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('event_rsvps')
+      .update({ status })
+      .eq('event_id', eventId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating RSVP status:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Get event RSVPs
+export async function getEventRSVPs(eventId: string): Promise<{ rsvps: EventRSVP[]; error: string | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('event_rsvps')
+      .select('*')
+      .eq('event_id', eventId);
+
+    if (error) throw error;
+
+    const rsvps: EventRSVP[] = data.map((r: any) => ({
+      userId: r.user_id,
+      userName: 'Loading...',
+      status: r.status,
+      requestedAt: r.requested_at,
+    }));
+
+    return { rsvps, error: null };
+  } catch (error: any) {
+    console.error('Error getting RSVPs:', error);
+    return { rsvps: [], error: error.message };
+  }
+}
+
 // Add comment to event
-export async function addEventComment(eventId: string, userId: string, text: string): Promise<{ comment: Comment | null; error: string | null }> {
+export async function addEventComment(
+  eventId: string,
+  userId: string,
+  text: string
+): Promise<{ comment: Comment | null; error: string | null }> {
   try {
     const { data, error } = await supabase
       .from('comments')
@@ -237,5 +380,87 @@ export async function addEventComment(eventId: string, userId: string, text: str
   } catch (error: any) {
     console.error('Error adding comment:', error);
     return { comment: null, error: error.message };
+  }
+}
+
+// Get event comments
+export async function getEventComments(eventId: string): Promise<{ comments: Comment[]; error: string | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const comments: Comment[] = data.map((c: any) => ({
+      id: c.id,
+      userId: c.user_id,
+      userName: 'Loading...',
+      userAvatar: '',
+      text: c.text,
+      createdAt: c.created_at,
+      isHost: false,
+    }));
+
+    return { comments, error: null };
+  } catch (error: any) {
+    console.error('Error getting comments:', error);
+    return { comments: [], error: error.message };
+  }
+}
+
+// Notify followers of new event
+export async function notifyFollowersOfNewEvent(
+  userId: string,
+  eventId: string,
+  eventTitle: string,
+  followerIds: string[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const notifications = followerIds.map(followerId => ({
+      user_id: followerId,
+      type: 'new_event',
+      from_user_id: userId,
+      event_id: eventId,
+      message: `posted a new event: ${eventTitle}`,
+      read: false,
+    }));
+
+    const { error } = await supabase
+      .from('notifications')
+      .insert(notifications);
+
+    if (error) throw error;
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error notifying followers:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Get followers who want notifications for this city
+export async function getNotifiableFollowers(
+  userId: string,
+  followerIds: string[]
+): Promise<{ followerIds: string[]; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, email_notifications')
+      .in('id', followerIds);
+
+    if (error) throw error;
+
+    const notifiableFollowerIds = data
+      .filter((user: any) => user.email_notifications !== false)
+      .map((user: any) => user.id);
+
+    return { followerIds: notifiableFollowerIds };
+  } catch (error: any) {
+    console.error('Error getting notifiable followers:', error);
+    return { followerIds: [], error: error.message };
   }
 }
