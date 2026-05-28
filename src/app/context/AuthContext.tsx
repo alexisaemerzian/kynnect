@@ -225,26 +225,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userData = dbUserToUserData(profile);
       userData.id = uid;
       
-      try {
-        const avatarResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-026f502c/avatar/${uid}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${publicAnonKey}`,
-            },
-          }
-        );
-        
-        if (avatarResponse.ok) {
-          const { avatarUrl } = await avatarResponse.json();
-          if (avatarUrl) {
-            userData.avatar = avatarUrl;
-          }
-        }
-      } catch (avatarError) {
-        console.error('Error fetching avatar:', avatarError);
+   // Get avatar directly from profile (no server call needed)
+      if (profile.avatar_url) {
+        userData.avatar = profile.avatar_url;
       }
-      
       setUser(userData);
       setUserId(uid);
       setIsPremium(userData.isPremium || false);
