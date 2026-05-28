@@ -41,47 +41,19 @@ async function createUserProfileViaServer(userId: string, email: string, name?: 
 // Sign up a new user
 export async function signUp(email: string, password: string, userData: Omit<UserData, 'email'>) {
   try {
-    console.log('Starting signup for:', email);
-    
-    // Check how many accounts exist with this email
-    const { data: existingProfiles } = await supabase
-      .from('users')
-      .select('id, email')
-      .eq('email', email);
-    
-    const accountCount = existingProfiles?.length || 0;
-    console.log(`Found ${accountCount} existing accounts with email:`, email);
-    
-    // Allow up to 2 accounts per email
-    if (accountCount >= 2) {
-      return {
-        success: false,
-        error: 'Maximum of 2 accounts per email reached. Please use a different email or manage your existing accounts.'
-      };
-    }
-    
-    // For additional accounts (2nd, 3rd, etc.), append a suffix to make the auth email unique
-    // This keeps the real email in the profile table while satisfying Supabase's unique constraint
+    // Try creating account with base email first (fastest path for new users)
     let authEmail = email;
-    if (accountCount > 0) {
-      authEmail = `${email.split('@')[0]}+account${accountCount + 1}@${email.split('@')[1]}`;
-      console.log(`Creating additional account #${accountCount + 1}, using auth email:`, authEmail);
-    }
-    
-    // Create auth user with potentially modified email
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    let { data: authData, error: authError } = await supabase.auth.signUp({
       email: authEmail,
       password,
       options: {
-        emailRedirectTo: undefined, // Don't require email confirmation
+        emailRedirectTo: undefined,
         data: {
           name: userData.name,
-          base_email: email, // Store the real email in metadata
+          base_email: email,
         }
       }
     });
-
-    console.log('Auth signup result:', { authData, authError });
 
     if (authError) {
       // If auth user already exists but profile doesn't, this might be an orphaned account
@@ -196,58 +168,42 @@ export async function signUp(email: string, password: string, userData: Omit<Use
 // Sign in existing user
 export async function signIn(email: string, password: string) {
   try {
-    console.log('🔐 Starting sign in for:', email);
-    console.log('📋 localStorage before sign in:', Object.keys(localStorage));
-    
-    // First, check how many accounts exist with this email
-    const { data: profiles } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email);
-    
-    const accountCount = profiles?.length || 0;
-    console.log(`📊 Found ${accountCount} accounts with email:`, email);
-    
-    // Try to sign in with the exact email first (this would be the first/primary account)
+    // Try to sign in with the exact email first (fastest path)
     let { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-    
-    // If login fails with the exact email and there are multiple accounts,
-    // try the modified email address (+account2 only)
-    if (error && error.message?.includes('Invalid login credentials') && accountCount > 1) {
-      console.log('🔍 Login failed with base email, trying additional account variations...');
 
-      // Try +account2 only (max 2 accounts allowed)
-      for (let i = 2; i <= accountCount && i <= 2; i++) {
-        const modifiedEmail = `${email.split('@')[0]}+account${i}@${email.split('@')[1]}`;
-        console.log(`Trying auth email: ${modifiedEmail}`);
-        
+    // If login fails, only then check for multiple accounts and try variations
+    if (error && error.message?.includes('Invalid login credentials')) {
+      // Check for multiple accounts only if first attempt failed
+      const { data: profiles } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email);
+
+      const accountCount = profiles?.length || 0;
+
+      // Try +account2 variation if multiple accounts exist
+      if (accountCount > 1) {
+        const modifiedEmail = `${email.split('@')[0]}+account2@${email.split('@')[1]}`;
+
         const attemptResult = await supabase.auth.signInWithPassword({
           email: modifiedEmail,
           password,
         });
-        
+
         if (!attemptResult.error && attemptResult.data.user) {
-          console.log('✅ Login successful with modified email:', modifiedEmail);
           data = attemptResult.data;
           error = null;
-          break;
         }
       }
     }
-    
-    // If still no success, provide a helpful error message
+
+    // If still unsuccessful, throw error
     if (error) {
-      if (accountCount > 1 && error.message?.includes('Invalid login credentials')) {
-        throw new Error(`Invalid password. You have ${accountCount} accounts with this email. Make sure you're using the correct password for this account.`);
-      }
       throw error;
     }
-
-    console.log('📋 localStorage after sign in:', Object.keys(localStorage));
-    console.log('🔍 Looking for Supabase keys:', Object.keys(localStorage).filter(k => k.includes('sb-')));
 
     if (!data?.user) throw new Error('Failed to sign in');
     
