@@ -56,72 +56,52 @@ export async function signUp(email: string, password: string, userData: Omit<Use
     });
 
     if (authError) {
-      // If auth user already exists but profile doesn't, this might be an orphaned account
-      // This can happen if signup was interrupted or if the user is creating an additional account
+      // If auth user already exists, try with +account2 suffix for second account
       if (authError.message?.includes('User already registered') || authError.message?.includes('already been registered')) {
-        console.log('⚠️ Auth user with modified email already exists. This likely means a previous signup was interrupted.');
-        console.log('🔄 Will delete the orphaned auth account and create a fresh one...');
-        
-        // For additional accounts, we need to use a different strategy
-        // Instead of trying to recover, we'll increment the suffix until we find an unused one
-        if (accountCount > 0) {
-          console.log('🔄 Trying alternative account suffixes...');
-          
-          // Try account2 suffix only (we allow max 2 accounts)
-          for (let suffix = accountCount + 2; suffix <= 2; suffix++) {
-            const alternativeEmail = `${email.split('@')[0]}+account${suffix}@${email.split('@')[1]}`;
-            console.log(`Trying alternative email: ${alternativeEmail}`);
-            
-            const { data: altAuthData, error: altAuthError } = await supabase.auth.signUp({
-              email: alternativeEmail,
-              password,
-              options: {
-                data: {
-                  name: userData.name,
-                  base_email: email,
-                }
-              }
-            });
-            
-            if (!altAuthError && altAuthData.user) {
-              console.log(`✅ Successfully created auth account with suffix ${suffix}`);
-              authEmail = alternativeEmail;
-              
-              // Create the profile
-              const { error: profileError } = await supabase.from('users').upsert({
-                id: altAuthData.user.id,
-                email, // Store the real email in the profile
-                name: userData.name,
-                phone: userData.phone,
-                age: userData.age,
-                ethnicity_id: localStorage.getItem('selectedEthnicity') || 'armenian',
-                notification_city: userData.notificationCity || null,
-                email_notifications: userData.emailNotifications ?? true,
-                sms_notifications: userData.smsNotifications ?? true,
-                is_organization: userData.isOrganization ?? false,
-                organization_name: userData.organizationName || null,
-                organization_type: userData.organizationType || null,
-                organization_website: userData.organizationWebsite || null,
-                organization_description: userData.organizationDescription || null,
-                organization_location: userData.organizationLocation || null,
-                available_ethnicities: (userData as any).availableEthnicities || [localStorage.getItem('selectedEthnicity') || 'armenian'],
-              }, {
-                onConflict: 'id',
-                ignoreDuplicates: false,
-              });
-              
-              if (profileError) throw profileError;
-              
-              console.log('✅ Signup successful with alternative suffix!');
-              return { success: true, user: altAuthData.user };
+        // Try with +account2 suffix
+        const alternativeEmail = `${email.split('@')[0]}+account2@${email.split('@')[1]}`;
+
+        const { data: altAuthData, error: altAuthError } = await supabase.auth.signUp({
+          email: alternativeEmail,
+          password,
+          options: {
+            data: {
+              name: userData.name,
+              base_email: email,
             }
           }
-          
-          // If we get here, all suffixes failed
-          throw new Error('Unable to create additional account. Please try again or contact support.');
+        });
+
+        if (!altAuthError && altAuthData.user) {
+          // Create the profile
+          const { error: profileError } = await supabase.from('users').upsert({
+            id: altAuthData.user.id,
+            email, // Store the real email in the profile
+            name: userData.name,
+            phone: userData.phone,
+            age: userData.age,
+            ethnicity_id: localStorage.getItem('selectedEthnicity') || 'armenian',
+            notification_city: userData.notificationCity || null,
+            email_notifications: userData.emailNotifications ?? true,
+            sms_notifications: userData.smsNotifications ?? true,
+            is_organization: userData.isOrganization ?? false,
+            organization_name: userData.organizationName || null,
+            organization_type: userData.organizationType || null,
+            organization_website: userData.organizationWebsite || null,
+            organization_description: userData.organizationDescription || null,
+            organization_location: userData.organizationLocation || null,
+            available_ethnicities: (userData as any).availableEthnicities || [localStorage.getItem('selectedEthnicity') || 'armenian'],
+          }, {
+            onConflict: 'id',
+            ignoreDuplicates: false,
+          });
+
+          if (profileError) throw profileError;
+
+          return { success: true, user: altAuthData.user };
         }
       }
-      
+
       throw authError;
     }
     
