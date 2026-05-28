@@ -34,24 +34,40 @@ export async function createEvent(
     
     if (input.imageFile) {
       console.log('📤 Uploading image...');
-      const fileExt = input.imageFile.name.split('.').pop();
-      const fileName = `${userId}-${Date.now()}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('make-026f502c-event-images')
-        .upload(fileName, input.imageFile);
-      
-      if (uploadError) {
-        console.error('⚠️ Image upload error (using default image):', uploadError);
-        // Continue with default image instead of failing
+
+      // Check file size (max 5MB)
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (input.imageFile.size > maxSize) {
+        console.warn(`⚠️ Image too large (${(input.imageFile.size / 1024 / 1024).toFixed(2)}MB), using default image. Max: 5MB`);
+        // Continue with default image
       } else {
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('make-026f502c-event-images')
-          .getPublicUrl(fileName);
-        
-        imageUrl = publicUrl;
-        console.log('✅ Image uploaded successfully:', imageUrl);
+        const fileExt = input.imageFile.name.split('.').pop();
+        const fileName = `${userId}-${Date.now()}.${fileExt}`;
+
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from('make-026f502c-event-images')
+            .upload(fileName, input.imageFile, {
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error('⚠️ Image upload error (using default image):', uploadError);
+            // Continue with default image instead of failing
+          } else {
+            // Get public URL
+            const { data: { publicUrl } } = supabase.storage
+              .from('make-026f502c-event-images')
+              .getPublicUrl(fileName);
+
+            imageUrl = publicUrl;
+            console.log('✅ Image uploaded successfully:', imageUrl);
+          }
+        } catch (uploadError) {
+          console.error('⚠️ Image upload failed (using default image):', uploadError);
+          // Continue with default image
+        }
       }
     }
     
