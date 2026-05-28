@@ -29,148 +29,59 @@ export async function createEvent(
   userId: string
 ): Promise<{ event: Event | null; error: string | null }> {
   try {
-    // 1. Upload image if provided
-    let imageUrl = 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622'; // default
-    
-    if (input.imageFile) {
-      console.log('📤 Uploading image...');
+    console.log('📝 Creating event directly in database...');
 
-      // Check file size (max 5MB)
-      const maxSize = 5 * 1024 * 1024; // 5MB
-      if (input.imageFile.size > maxSize) {
-        console.warn(`⚠️ Image too large (${(input.imageFile.size / 1024 / 1024).toFixed(2)}MB), using default image. Max: 5MB`);
-        // Continue with default image
-      } else {
-        const fileExt = input.imageFile.name.split('.').pop();
-        const fileName = `${userId}-${Date.now()}.${fileExt}`;
-
-        try {
-          const { error: uploadError } = await supabase.storage
-            .from('make-026f502c-event-images')
-            .upload(fileName, input.imageFile, {
-              cacheControl: '3600',
-              upsert: false
-            });
-
-          if (uploadError) {
-            console.error('⚠️ Image upload error (using default image):', uploadError);
-            // Continue with default image instead of failing
-          } else {
-            // Get public URL
-            const { data: { publicUrl } } = supabase.storage
-              .from('make-026f502c-event-images')
-              .getPublicUrl(fileName);
-
-            imageUrl = publicUrl;
-            console.log('✅ Image uploaded successfully:', imageUrl);
-          }
-        } catch (uploadError) {
-          console.error('⚠️ Image upload failed (using default image):', uploadError);
-          // Continue with default image
-        }
-      }
-    }
-    
-    // 2. Get user data for host info - use server endpoint to bypass RLS
+    // 1. Get user data first
     console.log('👤 Fetching user data for:', userId);
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
-    const userController = new AbortController();
-    const userTimeoutId = setTimeout(() => userController.abort(), 5000); // 5 second timeout
-
-    let userResponse;
-    try {
-      userResponse = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-026f502c/users/${userId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-          },
-          signal: userController.signal,
-        }
-      );
-    } catch (error: any) {
-      clearTimeout(userTimeoutId);
-      if (error.name === 'AbortError') {
-        console.error('❌ User fetch timeout');
-        return { event: null, error: 'Failed to load user data. Please try again.' };
-      }
-      throw error;
-    } finally {
-      clearTimeout(userTimeoutId);
+    if (userError || !userData) {
+      console.error('❌ User fetch error:', userError);
+      return { event: null, error: 'Failed to load user data. Please try again.' };
     }
 
-    if (!userResponse.ok) {
-      console.error('❌ User fetch error:', await userResponse.json());
-      return { event: null, error: 'Failed to fetch user data' };
+    console.log('✅ User data loaded:', userData.name);
+
+    // 2. Default image (skip upload for now)
+    const imageUrl = 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622';
+
+    // 3. Create event directly in database
+    console.log('📝 Inserting event into database...');
+
+    const { data: eventData, error: eventError } = await supabase
+      .from('events')
+      .insert({
+        title: input.title,
+        description: input.description,
+        type: input.type,
+        city: input.city,
+        location: input.location,
+        date: input.date,
+        time: input.time,
+        address: input.address || input.location,
+        host_id: userId,
+        max_attendees: input.maxAttendees,
+        image_url: imageUrl,
+        tags: input.tags,
+        coordinates_lat: input.coordinates?.lat,
+        coordinates_lng: input.coordinates?.lng,
+        show_address: input.showAddress ?? false,
+        ethnicity_id: input.ethnicityId,
+      })
+      .select()
+      .single();
+
+    if (eventError) {
+      console.error('❌ Event creation error:', eventError);
+      return { event: null, error: eventError.message || 'Failed to create event' };
     }
 
-    const { user: userData } = await userResponse.json();
-
-    if (!userData) {
-      console.error('No user data found for ID:', userId);
-      return { event: null, error: 'User not found' };
-    }
-    
-    // 3. Create event via server endpoint to bypass RLS
-    console.log('📝 Creating event...');
-
-    // Add timeout to prevent hanging
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-    let eventResponse;
-    try {
-      eventResponse = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-026f502c/events`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            title: input.title,
-            description: input.description,
-            type: input.type,
-            city: input.city,
-            location: input.location,
-            date: input.date,
-            time: input.time,
-            address: input.address,
-            hostId: userId,
-            maxAttendees: input.maxAttendees,
-            imageUrl: imageUrl,
-            tags: input.tags,
-            coordinatesLat: input.coordinates?.lat,
-            coordinatesLng: input.coordinates?.lng,
-            showAddress: input.showAddress ?? false,
-            ethnicityId: input.ethnicityId,
-            // Only send addressVisibility if explicitly provided
-            ...(input.addressVisibility ? { addressVisibility: input.addressVisibility } : {}),
-          }),
-          signal: controller.signal,
-        }
-      );
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      if (error.name === 'AbortError') {
-        console.error('❌ Event creation timeout');
-        return { event: null, error: 'Request took too long. Please try again.' };
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    
-    if (!eventResponse.ok) {
-      const errorData = await eventResponse.json();
-      console.error('❌ Event creation error:', errorData);
-      return { event: null, error: errorData.error || 'Failed to create event' };
-    }
-    
-    const { event: eventData } = await eventResponse.json();
     console.log('✅ Event created successfully:', eventData.id);
-    
+
     // 4. Transform to frontend Event type
     const event: Event = {
       id: eventData.id,
@@ -185,12 +96,12 @@ export async function createEvent(
       host: {
         id: userId,
         name: userData.name,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userData.name}`,
+        avatar: userData.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userData.name}`,
         isOrganization: userData.is_organization,
         organizationName: userData.organization_name,
         organizationType: userData.organization_type,
       },
-      attendees: 1, // Host is always attending
+      attendees: 1,
       maxAttendees: eventData.max_attendees,
       imageUrl: eventData.image_url,
       tags: eventData.tags,
@@ -200,23 +111,14 @@ export async function createEvent(
       } : undefined,
       showAddress: eventData.show_address,
       createdAt: eventData.created_at,
-      rsvps: [],
-      comments: [],
     };
-    
+
     return { event, error: null };
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Unexpected error creating event:', error);
-    return { event: null, error: 'An unexpected error occurred' };
+    return { event: null, error: error.message || 'Failed to create event' };
   }
 }
-
-export async function getEventsByEthnicity(
-  ethnicityId: string
-): Promise<{ events: Event[]; error: string | null }> {
-  try {
-    console.log('🔍 Fetching events for ethnicity:', ethnicityId);
-    console.log('🌐 Server URL:', `https://${projectId}.supabase.co/functions/v1/make-server-026f502c/events?ethnicityId=${ethnicityId}`);
     
     // Use server endpoint to bypass RLS with timeout
     const controller = new AbortController();
